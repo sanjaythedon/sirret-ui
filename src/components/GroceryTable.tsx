@@ -5,7 +5,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 type GroceryItem = {
   tamil_name: string;
   english_name: string;
-  quantity: string;
+  weight: string;
+  quantity?: number | null;
 };
 
 interface GroceryTableProps {
@@ -20,6 +21,7 @@ export default function GroceryTable({ items }: GroceryTableProps) {
           <TableRow>
             <TableHead>Tamil Name</TableHead>
             <TableHead>English Name</TableHead>
+            <TableHead>Weight</TableHead>
             <TableHead>Quantity</TableHead>
           </TableRow>
         </TableHeader>
@@ -28,7 +30,8 @@ export default function GroceryTable({ items }: GroceryTableProps) {
             <TableRow key={index}>
               <TableCell className="font-medium">{item.tamil_name}</TableCell>
               <TableCell>{item.english_name}</TableCell>
-              <TableCell>{item.quantity}</TableCell>
+              <TableCell>{item.weight}</TableCell>
+              <TableCell>{item.quantity !== null ? item.quantity : ''}</TableCell>
             </TableRow>
           ))}
         </TableBody>

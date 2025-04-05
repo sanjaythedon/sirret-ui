@@ -12,7 +12,8 @@ import GroceryTable from '@/components/GroceryTable';
 type GroceryItem = {
   tamil_name: string;
   english_name: string;
-  quantity: string;
+  weight: string;
+  quantity?: number | null;
 };
 
 export default function Home() {
@@ -56,7 +57,7 @@ export default function Home() {
             <CardTitle>Record Grocery Items</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="mb-4">Speak your grocery list in Tamil or English. Include quantities for each item.</p>
+            <p className="mb-4">Speak your grocery list in Tamil or English. Include weights (like "500 grams", "1 kg") and quantities for each item.</p>
             <AudioRecorder onAudioRecorded={handleAudioData} isLoading={isLoading} />
           </CardContent>
         </Card>
