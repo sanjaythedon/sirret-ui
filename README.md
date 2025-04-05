@@ -1,22 +1,48 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Grocery List Speech-to-Text Frontend
+
+This is the frontend application for the Tamil/English Grocery List Speech-to-Text application. It provides a user interface for recording grocery lists and displaying the transcribed results.
+
+## Features
+
+- Audio recording directly in the browser
+- Seamless integration with backend for transcription and translation
+- Responsive UI built with Next.js and Shadcn/UI
+- Display of grocery items with Tamil names, English names, and quantities
+
+## Tech Stack
+
+- [Next.js](https://nextjs.org/) - React framework
+- [Shadcn/UI](https://ui.shadcn.com/) - Component library
+- [Tailwind CSS](https://tailwindcss.com/) - Utility-first CSS framework
+- [TypeScript](https://www.typescriptlang.org/) - JavaScript with syntax for types
 
 ## Getting Started
 
-First, run the development server:
+First, install the dependencies:
+
+```bash
+npm install
+```
+
+Then, run the development server:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Usage
+
+1. Click the "Start Recording" button and speak your grocery list in Tamil or English
+2. Include quantities for each item (e.g., "2 kilos of rice", "500 grams of sugar")
+3. Click "Stop Recording" when you're done
+4. Wait for the backend to process your recording
+5. View your structured grocery list in the table below
+
+## Note
+
+Make sure the backend server is running at http://localhost:8000 before attempting to record and transcribe audio.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
