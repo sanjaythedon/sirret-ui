@@ -1,9 +1,7 @@
 'use client';
 
-import { useState, useRef } from 'react';
-import { Button } from '@/components/ui/button';
+import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Toaster } from 'sonner';
 import { toast } from 'sonner';
 import AudioRecorder from '@/components/AudioRecorder';
@@ -59,7 +57,7 @@ export default function Home() {
             <CardTitle>Record Grocery Items</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="mb-4">Speak your grocery list in Tamil or English. Include weights (like "500 grams", "1 kg") and quantities for each item.</p>
+            <p className="mb-4">Speak your grocery list in Tamil or English. Include weights (like 500 grams, 1 kg) and quantities for each item.</p>
             <AudioRecorder onAudioRecorded={handleAudioData} isLoading={isLoading} />
           </CardContent>
         </Card>
