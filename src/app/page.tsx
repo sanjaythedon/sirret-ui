@@ -27,12 +27,14 @@ export default function Home() {
       const formData = new FormData();
       formData.append('file', audioBlob, 'recording.webm');
       
-      const response = await fetch('http://localhost:8000/transcribe/', {
+      const response = await fetch('https://rb3aswptze.execute-api.ap-south-1.amazonaws.com/prod/transcribe/', {
         method: 'POST',
         body: formData,
       });
       
       if (!response.ok) {
+        console.log('Response status:', response.status);
+        console.log('Response:', response.json());
         throw new Error('Failed to transcribe audio');
       }
       
