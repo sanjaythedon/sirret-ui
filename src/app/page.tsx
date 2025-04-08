@@ -17,34 +17,31 @@ type GroceryItem = {
 export default function Home() {
   const [groceryItems, setGroceryItems] = useState<GroceryItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [isStreaming, setIsStreaming] = useState(false);
 
-  const handleAudioData = async (audioBlob: Blob) => {
+  const handleStreamingStart = () => {
     setIsLoading(true);
-    
-    try {
-      const formData = new FormData();
-      formData.append('file', audioBlob, 'recording.webm');
-      
-      const response = await fetch('https://rb3aswptze.execute-api.ap-south-1.amazonaws.com/prod/transcribe/', {
-        method: 'POST',
-        body: formData,
-      });
-      
-      if (!response.ok) {
-        console.log('Response status:', response.status);
-        console.log('Response:', response.json());
-        throw new Error('Failed to transcribe audio');
+    setIsStreaming(true);
+    // Clear previous results when starting a new recording
+    setGroceryItems([]);
+    toast.info('Recording started');
+  };
+
+  const handleGroceryItemReceived = (item: GroceryItem) => {
+    setGroceryItems(prevItems => [...prevItems, item]);
+    // Briefly flash a loading state off to show progress
+    setIsLoading(false);
+    setTimeout(() => {
+      if (isStreaming) {
+        setIsLoading(true);
       }
-      
-      const data = await response.json();
-      setGroceryItems(data);
-      toast.success('Grocery list updated');
-    } catch (error) {
-      console.error('Error:', error);
-      toast.error('Error processing your recording');
-    } finally {
-      setIsLoading(false);
-    }
+    }, 300);
+  };
+
+  const handleStreamingComplete = () => {
+    setIsLoading(false);
+    setIsStreaming(false);
+    toast.success('Grocery list updated');
   };
 
   return (
@@ -58,7 +55,12 @@ export default function Home() {
           </CardHeader>
           <CardContent>
             <p className="mb-4">Speak your grocery list in Tamil or English. Include weights (like 500 grams, 1 kg) and quantities for each item.</p>
-            <AudioRecorder onAudioRecorded={handleAudioData} isLoading={isLoading} />
+            <AudioRecorder 
+              onStreamingStart={handleStreamingStart}
+              onGroceryItemReceived={handleGroceryItemReceived}
+              onStreamingComplete={handleStreamingComplete}
+              isLoading={isLoading} 
+            />
           </CardContent>
         </Card>
         
@@ -71,7 +73,7 @@ export default function Home() {
               <GroceryTable items={groceryItems} />
             ) : (
               <p className="text-center text-gray-500 my-8">
-                Your grocery list will appear here after recording
+                Your grocery list will appear here as you speak
               </p>
             )}
           </CardContent>

@@ -1,43 +1,118 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
+import { toast } from 'sonner';
 
 interface AudioRecorderProps {
-  onAudioRecorded: (audioBlob: Blob) => void;
+  onStreamingStart: () => void;
+  onGroceryItemReceived: (item: any) => void;
+  onStreamingComplete: () => void;
   isLoading: boolean;
 }
 
-export default function AudioRecorder({ onAudioRecorded, isLoading }: AudioRecorderProps) {
+export default function AudioRecorder({ 
+  onStreamingStart, 
+  onGroceryItemReceived, 
+  onStreamingComplete, 
+  isLoading 
+}: AudioRecorderProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
+  const [isConnected, setIsConnected] = useState(false);
+  
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const socketRef = useRef<WebSocket | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
+
+  // Close WebSocket on component unmount
+  useEffect(() => {
+    return () => {
+      if (socketRef.current) {
+        socketRef.current.close();
+      }
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+      }
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
+    };
+  }, []);
+
+  const setupWebSocket = async () => {
+    // Use the production URL in production, and localhost in development
+    const wsUrl = process.env.NODE_ENV === 'production' 
+      ? 'wss://your-production-domain/prod/ws/stream-audio/'
+      : 'ws://localhost:8000/ws/stream-audio/';
+    
+    return new Promise<WebSocket>((resolve, reject) => {
+      const socket = new WebSocket(wsUrl);
+      socketRef.current = socket;
+  
+      socket.onopen = () => {
+        console.log('WebSocket connection established');
+        setIsConnected(true);
+        resolve(socket);
+      };
+  
+      socket.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.status === 'completed') {
+            console.log('Streaming completed');
+            onStreamingComplete();
+          } else if (data.error) {
+            console.error('Error from server:', data.error);
+          } else {
+            // Received a grocery item
+            onGroceryItemReceived(data);
+          }
+        } catch (error) {
+          console.error('Error parsing WebSocket message:', error);
+        }
+      };
+  
+      socket.onerror = (error) => {
+        console.error('WebSocket error:', error);
+        reject(error);
+      };
+  
+      socket.onclose = () => {
+        console.log('WebSocket connection closed');
+        setIsConnected(false);
+      };
+    });
+  };
 
   const startRecording = async () => {
     try {
+      setIsRecording(true);
+      onStreamingStart();
+      
+      // First establish the WebSocket connection
+      await setupWebSocket();
+      
+      // Then start accessing the media stream
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
       
-      mediaRecorderRef.current = new MediaRecorder(stream);
-      chunksRef.current = [];
+      // Configure the MediaRecorder for real-time streaming
+      const options = { mimeType: 'audio/webm; codecs=opus' };
+      const mediaRecorder = new MediaRecorder(stream, options);
+      mediaRecorderRef.current = mediaRecorder;
       
-      mediaRecorderRef.current.ondataavailable = (e) => {
-        if (e.data.size > 0) {
-          chunksRef.current.push(e.data);
+      // Set up event listener to send chunks as they become available
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0 && socketRef.current?.readyState === WebSocket.OPEN) {
+          console.log(`Sending chunk of size ${event.data.size} bytes`);
+          socketRef.current.send(event.data);
         }
       };
       
-      mediaRecorderRef.current.onstop = () => {
-        const audioBlob = new Blob(chunksRef.current, { type: 'audio/webm' });
-        onAudioRecorded(audioBlob);
-        
-        // Stop all tracks of the stream to release the microphone
-        stream.getTracks().forEach(track => track.stop());
-      };
-      
-      mediaRecorderRef.current.start();
-      setIsRecording(true);
+      // Start recording with small time slices (100ms) for more responsive streaming
+      mediaRecorder.start(100);
       
       // Start a timer to show recording duration
       let seconds = 0;
@@ -46,23 +121,39 @@ export default function AudioRecorder({ onAudioRecorded, isLoading }: AudioRecor
         setRecordingDuration(seconds);
       }, 1000);
     } catch (error) {
-      console.error('Error accessing microphone:', error);
+      console.error('Error starting recording:', error);
+      setIsRecording(false);
+      if (socketRef.current) {
+        socketRef.current.close();
+      }
+      toast.error('Failed to start recording');
     }
   };
   
   const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
+    setIsRecording(false);
+    
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop();
-      setIsRecording(false);
-      
-      // Clear the timer
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-        timerRef.current = null;
-      }
-      
-      setRecordingDuration(0);
     }
+    
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+    }
+    
+    // Send end-of-stream marker (single byte with value 255)
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      const endMarker = new Uint8Array([255]);
+      socketRef.current.send(endMarker);
+    }
+    
+    // Clear the timer
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    
+    setRecordingDuration(0);
   };
   
   const formatTime = (seconds: number) => {

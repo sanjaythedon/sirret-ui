@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { Download } from 'lucide-react';
@@ -17,6 +18,26 @@ interface GroceryTableProps {
 }
 
 export default function GroceryTable({ items }: GroceryTableProps) {
+  const [visibleItems, setVisibleItems] = useState<GroceryItem[]>([]);
+
+  // Effect to animate new items appearing
+  useEffect(() => {
+    // If we receive new items
+    if (items.length > visibleItems.length) {
+      // Add each new item with a small delay
+      const newItemIndex = visibleItems.length;
+      const timer = setTimeout(() => {
+        setVisibleItems(prevItems => [...prevItems, items[newItemIndex]]);
+      }, 300); // Small delay for animation effect
+      
+      return () => clearTimeout(timer);
+    }
+    // If items were reset (cleared), reset visible items too
+    else if (items.length === 0) {
+      setVisibleItems([]);
+    }
+  }, [items, visibleItems.length]);
+
   const handleExportToExcel = () => {
     // Create a worksheet
     const worksheet = XLSX.utils.json_to_sheet(
@@ -43,6 +64,7 @@ export default function GroceryTable({ items }: GroceryTableProps) {
           onClick={handleExportToExcel} 
           variant="outline"
           className="flex items-center gap-2"
+          disabled={items.length === 0}
         >
           <Download size={16} />
           Export to Excel
@@ -58,8 +80,11 @@ export default function GroceryTable({ items }: GroceryTableProps) {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {items.map((item, index) => (
-            <TableRow key={index}>
+          {visibleItems.map((item, index) => (
+            <TableRow 
+              key={index}
+              className="animate-fade-in animate-slide-in-from-right duration-500"
+            >
               <TableCell className="font-medium">{item.tamil_name}</TableCell>
               <TableCell>{item.english_name}</TableCell>
               <TableCell>{item.weight}</TableCell>
