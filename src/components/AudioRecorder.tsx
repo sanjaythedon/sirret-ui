@@ -25,8 +25,8 @@ export default function AudioRecorder({
   const socketRef = useRef<WebSocket | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
   const processingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const chunkStartTimeRef = useRef<number>(0);
 
   // Close WebSocket on component unmount
   useEffect(() => {
@@ -91,35 +91,75 @@ export default function AudioRecorder({
     });
   };
 
-  // Process and send accumulated audio every 3 seconds
-  const startProcessingAudio = () => {
+  // Create a complete audio recording for a time segment
+  const captureAudioSegment = async () => {
+    if (!streamRef.current || !socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
+    // Create a new MediaRecorder for this segment
+    const segmentRecorder = new MediaRecorder(streamRef.current, { mimeType: 'audio/webm' });
+    
+    // This promise will resolve when the segment is complete
+    const segmentPromise = new Promise<Blob>((resolve) => {
+      const chunks: Blob[] = [];
+      
+      segmentRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          chunks.push(event.data);
+        }
+      };
+      
+      segmentRecorder.onstop = () => {
+        // Create a new blob with proper WebM headers
+        const audioBlob = new Blob(chunks, { type: 'audio/webm' });
+        resolve(audioBlob);
+      };
+    });
+    
+    // Start recording this segment
+    segmentRecorder.start();
+    
+    // Record for 3 seconds
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    
+    // Only stop if we're still recording
+    if (segmentRecorder.state !== 'inactive') {
+      segmentRecorder.stop();
+    }
+    
+    // Get the audio blob when it's ready
+    const audioBlob = await segmentPromise;
+    
+    // Only send if the size is sufficient
+    if (audioBlob.size > 10000) { // 10KB minimum
+      console.log(`Sending audio segment of size ${audioBlob.size} bytes`);
+      socketRef.current.send(audioBlob);
+    }
+  };
+
+  // Start periodic capturing of audio segments
+  const startSegmentCapture = () => {
     // Clear existing interval if any
     if (processingIntervalRef.current) {
       clearInterval(processingIntervalRef.current);
     }
 
+    // Initial capture
+    captureAudioSegment();
+    
+    // Then capture every 3 seconds
     processingIntervalRef.current = setInterval(() => {
-      if (audioChunksRef.current.length > 0 && socketRef.current?.readyState === WebSocket.OPEN) {
-        // Create a complete audio file from accumulated chunks
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        
-        // Only send if we have enough audio data (50KB minimum)
-        if (audioBlob.size > 50000) {
-          console.log(`Sending audio chunk of size ${audioBlob.size} bytes`);
-          socketRef.current.send(audioBlob);
-          
-          // Clear the chunks after sending
-          audioChunksRef.current = [];
-        }
+      if (isRecording) {
+        captureAudioSegment();
       }
-    }, 3000); // Process every 3 seconds
+    }, 3000);
   };
 
   const startRecording = async () => {
     try {
       setIsRecording(true);
       onStreamingStart();
-      audioChunksRef.current = []; // Reset audio chunks
       
       // First establish the WebSocket connection
       await setupWebSocket();
@@ -128,23 +168,16 @@ export default function AudioRecorder({
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
       
-      // Configure the MediaRecorder for real-time streaming
+      // Configure the main MediaRecorder - this is just for display purposes
       const options = { mimeType: 'audio/webm' };
       const mediaRecorder = new MediaRecorder(stream, options);
       mediaRecorderRef.current = mediaRecorder;
       
-      // Set up event listener to accumulate audio chunks
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
-        }
-      };
+      // Start recording
+      mediaRecorder.start();
       
-      // Start recording with small time slices
-      mediaRecorder.start(500); // Collect data every 500ms
-      
-      // Start the interval to process and send accumulated audio
-      startProcessingAudio();
+      // Start capturing audio segments
+      startSegmentCapture();
       
       // Start a timer to show recording duration
       let seconds = 0;
@@ -179,19 +212,12 @@ export default function AudioRecorder({
       streamRef.current.getTracks().forEach(track => track.stop());
     }
     
-    // Send any remaining audio data
-    if (audioChunksRef.current.length > 0 && socketRef.current?.readyState === WebSocket.OPEN) {
-      const finalAudioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-      socketRef.current.send(finalAudioBlob);
-      audioChunksRef.current = [];
-    }
-    
-    // Send end-of-stream marker (single byte with value 255)
+    // Send end-of-stream marker
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
       setTimeout(() => {
         const endMarker = new Uint8Array([255]);
         socketRef.current?.send(endMarker);
-      }, 1000); // Give a second for the final audio to be processed
+      }, 1000); // Give a second for any final processing
     }
     
     // Clear the timer
