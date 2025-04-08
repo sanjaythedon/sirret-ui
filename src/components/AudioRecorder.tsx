@@ -21,12 +21,20 @@ export default function AudioRecorder({
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [isConnected, setIsConnected] = useState(false);
   
+  // Use ref to track recording state to avoid closure issues
+  const isRecordingRef = useRef(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const processingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const chunkStartTimeRef = useRef<number>(0);
+
+  // Keep isRecordingRef in sync with isRecording state
+  useEffect(() => {
+    isRecordingRef.current = isRecording;
+    console.log(`Recording state changed: ${isRecording}`);
+  }, [isRecording]);
 
   // Close WebSocket on component unmount
   useEffect(() => {
@@ -72,6 +80,7 @@ export default function AudioRecorder({
             console.error('Error from server:', data.error);
           } else {
             // Received a grocery item
+            console.log('Received grocery item:', data);
             onGroceryItemReceived(data);
           }
         } catch (error) {
@@ -91,84 +100,114 @@ export default function AudioRecorder({
     });
   };
 
-  // Create a complete audio recording for a time segment
-  const captureAudioSegment = async () => {
-    if (!streamRef.current || !socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
-      return;
-    }
-
-    // Create a new MediaRecorder for this segment
-    const segmentRecorder = new MediaRecorder(streamRef.current, { mimeType: 'audio/webm' });
-    
-    // This promise will resolve when the segment is complete
-    const segmentPromise = new Promise<Blob>((resolve) => {
-      const chunks: Blob[] = [];
-      
-      segmentRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          chunks.push(event.data);
-        }
-      };
-      
-      segmentRecorder.onstop = () => {
-        // Create a new blob with proper WebM headers
-        const audioBlob = new Blob(chunks, { type: 'audio/webm' });
-        resolve(audioBlob);
-      };
-    });
-    
-    // Start recording this segment
-    segmentRecorder.start();
-    
-    // Record for 3 seconds
-    await new Promise(resolve => setTimeout(resolve, 3000));
-    
-    // Only stop if we're still recording
-    if (segmentRecorder.state !== 'inactive') {
-      segmentRecorder.stop();
-    }
-    
-    // Get the audio blob when it's ready
-    const audioBlob = await segmentPromise;
-    
-    // Only send if the size is sufficient
-    if (audioBlob.size > 10000) { // 10KB minimum
-      console.log(`Sending audio segment of size ${audioBlob.size} bytes`);
-      socketRef.current.send(audioBlob);
-    }
-  };
-
   // Start periodic capturing of audio segments
   const startSegmentCapture = () => {
     // Clear existing interval if any
     if (processingIntervalRef.current) {
       clearInterval(processingIntervalRef.current);
+      processingIntervalRef.current = null;
     }
 
-    // Initial capture
-    captureAudioSegment();
+    console.log("Setting up audio capture segments");
     
-    // Then capture every 3 seconds
-    processingIntervalRef.current = setInterval(() => {
-      if (isRecording) {
-        captureAudioSegment();
+    // Use a separate function for capturing segments
+    let segmentCount = 0;
+    
+    // Function to handle each segment
+    const handleSegment = () => {
+      // Check recording state from ref, not from state variable
+      if (!isRecordingRef.current) {
+        console.log("Skipping segment: not recording anymore");
+        return;
       }
-    }, 3000);
+      
+      // Check other resources
+      if (!streamRef.current) {
+        console.log("Skipping segment: no audio stream available");
+        return;
+      }
+      
+      if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
+        console.log("Skipping segment: WebSocket not connected");
+        return;
+      }
+      
+      segmentCount++;
+      console.log(`Starting segment #${segmentCount} - recording state: ${isRecordingRef.current}`);
+      
+      try {
+        // Create a new MediaRecorder for this segment
+        const segmentRecorder = new MediaRecorder(streamRef.current, { mimeType: 'audio/webm' });
+        const chunks: Blob[] = [];
+        
+        // Set up event handlers
+        segmentRecorder.ondataavailable = (event) => {
+          if (event.data.size > 0) {
+            chunks.push(event.data);
+            console.log(`Got data for segment #${segmentCount}: ${event.data.size} bytes`);
+          }
+        };
+        
+        segmentRecorder.onstop = () => {
+          console.log(`Segment #${segmentCount} completed`);
+          const audioBlob = new Blob(chunks, { type: 'audio/webm' });
+          
+          if (audioBlob.size > 5000 && socketRef.current?.readyState === WebSocket.OPEN) {
+            console.log(`Sending segment #${segmentCount}: ${audioBlob.size} bytes`);
+            socketRef.current.send(audioBlob);
+          } else {
+            console.log(`Segment #${segmentCount} not sent: too small or socket closed`);
+          }
+        };
+        
+        // Start with a timeout to ensure we get data
+        segmentRecorder.start(100);
+        
+        // Stop after 3 seconds
+        setTimeout(() => {
+          if (segmentRecorder.state !== 'inactive') {
+            console.log(`Stopping segment #${segmentCount}`);
+            segmentRecorder.stop();
+          }
+        }, 3000);
+      } catch (error) {
+        console.error(`Error in segment #${segmentCount}:`, error);
+      }
+    };
+    
+    // Run immediately for first segment
+    console.log("Starting first segment immediately");
+    handleSegment();
+    
+    // Then set up interval for additional segments
+    console.log("Setting up interval for future segments");
+    processingIntervalRef.current = setInterval(() => {
+      console.log("Interval triggered, recording state:", isRecordingRef.current);
+      handleSegment();
+    }, 3500);
   };
 
   const startRecording = async () => {
     try {
+      console.log('Starting recording...');
+      
+      // Update both state and ref
       setIsRecording(true);
+      isRecordingRef.current = true;
+      
       onStreamingStart();
       
       // First establish the WebSocket connection
+      console.log('Setting up WebSocket...');
       await setupWebSocket();
       
       // Then start accessing the media stream
+      console.log('Requesting microphone access...');
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
       
-      // Configure the main MediaRecorder - this is just for display purposes
+      // Configure the main MediaRecorder
+      console.log('Setting up main MediaRecorder...');
       const options = { mimeType: 'audio/webm' };
       const mediaRecorder = new MediaRecorder(stream, options);
       mediaRecorderRef.current = mediaRecorder;
@@ -177,6 +216,7 @@ export default function AudioRecorder({
       mediaRecorder.start();
       
       // Start capturing audio segments
+      console.log('Starting segment capture...');
       startSegmentCapture();
       
       // Start a timer to show recording duration
@@ -185,9 +225,12 @@ export default function AudioRecorder({
         seconds += 1;
         setRecordingDuration(seconds);
       }, 1000);
+      
+      console.log('Recording started successfully');
     } catch (error) {
       console.error('Error starting recording:', error);
       setIsRecording(false);
+      isRecordingRef.current = false;
       if (socketRef.current) {
         socketRef.current.close();
       }
@@ -196,27 +239,36 @@ export default function AudioRecorder({
   };
   
   const stopRecording = () => {
+    console.log('Stopping recording...');
+    
+    // Update both state and ref
     setIsRecording(false);
+    isRecordingRef.current = false;
     
     // Stop the processing interval
     if (processingIntervalRef.current) {
+      console.log('Clearing processing interval');
       clearInterval(processingIntervalRef.current);
       processingIntervalRef.current = null;
     }
     
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      console.log('Stopping main media recorder');
       mediaRecorderRef.current.stop();
     }
     
     if (streamRef.current) {
+      console.log('Stopping all audio tracks');
       streamRef.current.getTracks().forEach(track => track.stop());
     }
     
     // Send end-of-stream marker
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      console.log('Sending end-of-stream marker');
       setTimeout(() => {
         const endMarker = new Uint8Array([255]);
         socketRef.current?.send(endMarker);
+        console.log('End-of-stream marker sent');
       }, 1000); // Give a second for any final processing
     }
     
@@ -227,6 +279,7 @@ export default function AudioRecorder({
     }
     
     setRecordingDuration(0);
+    console.log('Recording stopped');
   };
   
   const formatTime = (seconds: number) => {
