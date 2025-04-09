@@ -56,9 +56,12 @@ export default function AudioRecorder({
 
   const setupWebSocket = async () => {
     // Use the production URL in production, and localhost in development
-    const wsUrl = process.env.NODE_ENV === 'production' 
-      ? 'wss://your-production-domain/prod/ws/stream-audio/'
-      : 'ws://localhost:8000/ws/stream-audio/';
+    // const wsUrl = process.env.NODE_ENV === 'production' 
+    //   ? 'wss://your-production-domain/prod/ws/stream-audio/'
+    //   : 'ws://localhost:8000/ws/stream-audio/';
+
+    // const wsUrl = 'ws://localhost:8000/ws/stream-audio/';
+    const wsUrl = 'wss://e2plx8os7h.execute-api.ap-south-1.amazonaws.com/prod';
     
     return new Promise<WebSocket>((resolve, reject) => {
       const socket = new WebSocket(wsUrl);
