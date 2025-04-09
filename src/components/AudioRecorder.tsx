@@ -208,12 +208,12 @@ export default function AudioRecorder({
       
       // Configure the main MediaRecorder
       console.log('Setting up main MediaRecorder...');
-      const options = { mimeType: 'audio/webm' };
-      const mediaRecorder = new MediaRecorder(stream, options);
-      mediaRecorderRef.current = mediaRecorder;
+      // const options = { mimeType: 'audio/webm' };
+      // const mediaRecorder = new MediaRecorder(stream, options);
+      // mediaRecorderRef.current = mediaRecorder;
       
-      // Start recording
-      mediaRecorder.start();
+      // // Start recording
+      // mediaRecorder.start();
       
       // Start capturing audio segments
       console.log('Starting segment capture...');
