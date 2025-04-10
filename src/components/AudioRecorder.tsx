@@ -70,35 +70,82 @@ export default function AudioRecorder({
       socket.onopen = () => {
         console.log('WebSocket connection established');
         setIsConnected(true);
+        
+        // Send a test message to verify the connection is working
+        try {
+          console.log('Sending test message...');
+          socket.send(JSON.stringify({
+            action: 'test',
+            message: 'Testing connection'
+          }));
+        } catch (error) {
+          console.error('Error sending test message:', error);
+        }
+        
         resolve(socket);
       };
   
       socket.onmessage = (event) => {
         try {
-          const data = JSON.parse(event.data);
+          console.log('Received message from server:', event.data);
+          
+          // Make sure we have data
+          if (!event.data) {
+            console.warn('Received empty message from server');
+            return;
+          }
+          
+          // Try to parse as JSON
+          let data;
+          try {
+            data = JSON.parse(event.data);
+          } catch (parseError) {
+            console.error('Error parsing WebSocket message:', parseError);
+            console.warn('Received non-JSON message:', event.data);
+            return;
+          }
+          
+          // Process the parsed data
           if (data.status === 'completed') {
             console.log('Streaming completed');
             onStreamingComplete();
           } else if (data.error) {
             console.error('Error from server:', data.error);
+            toast.error(`Server error: ${data.error}`);
+          } else if (data.status === 'test_received') {
+            console.log('Test message received by server');
+          } else if (data.message) {
+            console.log('Message from server:', data.message);
           } else {
             // Received a grocery item
             console.log('Received grocery item:', data);
             onGroceryItemReceived(data);
           }
         } catch (error) {
-          console.error('Error parsing WebSocket message:', error);
+          console.error('Error processing WebSocket message:', error);
         }
       };
   
       socket.onerror = (error) => {
         console.error('WebSocket error:', error);
+        toast.error('WebSocket connection error');
         reject(error);
       };
   
-      socket.onclose = () => {
-        console.log('WebSocket connection closed');
+      socket.onclose = (event) => {
+        console.log('WebSocket connection closed', {
+          code: event.code,
+          reason: event.reason,
+          wasClean: event.wasClean
+        });
         setIsConnected(false);
+        
+        // Show toast based on close code
+        if (event.code === 1006) {
+          toast.error('Connection closed abnormally. Please try again.');
+        } else if (!event.wasClean) {
+          toast.error(`Connection closed: ${event.reason || 'Unknown reason'}`);
+        }
       };
     });
   };
@@ -130,8 +177,13 @@ export default function AudioRecorder({
         return;
       }
       
-      if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
-        console.log("Skipping segment: WebSocket not connected");
+      if (!socketRef.current) {
+        console.log("Skipping segment: WebSocket not available");
+        return;
+      }
+      
+      if (socketRef.current.readyState !== WebSocket.OPEN) {
+        console.log(`Skipping segment: WebSocket not open (state: ${socketRef.current.readyState})`);
         return;
       }
       
@@ -157,22 +209,56 @@ export default function AudioRecorder({
           
           if (audioBlob.size > 5000 && socketRef.current?.readyState === WebSocket.OPEN) {
             console.log(`Sending segment #${segmentCount}: ${audioBlob.size} bytes`);
-            socketRef.current.send(audioBlob);
+            
+            // Convert blob to base64
+            const reader = new FileReader();
+            reader.readAsDataURL(audioBlob); 
+            reader.onloadend = function() {
+              const result = reader.result;
+              if (result && typeof result === 'string') {
+                const base64data = result.split(',')[1]; // Remove the data URL prefix
+                
+                // Calculate size to inform user
+                const base64Size = base64data.length;
+                console.log(`Base64 data size: ${base64Size} chars`);
+                
+                // Check if size is too large
+                if (base64Size > 100000) {
+                  console.warn('Audio data is very large, might cause issues with WebSocket');
+                }
+                
+                // Check WebSocket state again before sending
+                if (socketRef.current?.readyState === WebSocket.OPEN) {
+                  // Send as a JSON message
+                  try {
+                    socketRef.current.send(JSON.stringify({
+                      action: 'audio',
+                      data: base64data
+                    }));
+                    console.log(`Sent base64 encoded audio data: ${base64data.length} chars`);
+                  } catch (error) {
+                    console.error('Error sending audio data:', error);
+                  }
+                } else {
+                  console.error(`Cannot send: WebSocket not open (readyState: ${socketRef.current?.readyState})`);
+                }
+              }
+            }
           } else {
-            console.log(`Segment #${segmentCount} not sent: too small or socket closed`);
+            console.log(`Segment #${segmentCount} not sent: ${!audioBlob || audioBlob.size <= 5000 ? 'too small' : 'socket closed'}`);
           }
         };
         
         // Start with a timeout to ensure we get data
         segmentRecorder.start(100);
         
-        // Stop after 3 seconds
+        // Stop after 2 seconds to create smaller chunks
         setTimeout(() => {
           if (segmentRecorder.state !== 'inactive') {
             console.log(`Stopping segment #${segmentCount}`);
             segmentRecorder.stop();
           }
-        }, 3000);
+        }, 2000); // Reduced from 3000ms to 2000ms
       } catch (error) {
         console.error(`Error in segment #${segmentCount}:`, error);
       }
@@ -186,8 +272,17 @@ export default function AudioRecorder({
     console.log("Setting up interval for future segments");
     processingIntervalRef.current = setInterval(() => {
       console.log("Interval triggered, recording state:", isRecordingRef.current);
-      handleSegment();
-    }, 3500);
+      // Check if WebSocket is still open
+      if (socketRef.current?.readyState !== WebSocket.OPEN) {
+        console.error(`WebSocket not open in interval (state: ${socketRef.current?.readyState})`);
+        // Try to reconnect?
+        if (isRecordingRef.current) {
+          toast.error('WebSocket connection lost. Recording may be interrupted.');
+        }
+      } else {
+        handleSegment();
+      }
+    }, 2500); // Reduced from 3500ms to 2500ms
   };
 
   const startRecording = async () => {
@@ -265,12 +360,14 @@ export default function AudioRecorder({
       streamRef.current.getTracks().forEach(track => track.stop());
     }
     
-    // Send end-of-stream marker
+    // Send end-of-stream marker as JSON
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
       console.log('Sending end-of-stream marker');
       setTimeout(() => {
-        const endMarker = new Uint8Array([255]);
-        socketRef.current?.send(endMarker);
+        socketRef.current?.send(JSON.stringify({
+          action: 'end',
+          message: 'Recording complete'
+        }));
         console.log('End-of-stream marker sent');
       }, 1000); // Give a second for any final processing
     }
