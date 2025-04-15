@@ -282,7 +282,7 @@ export default function AudioRecorder({
       } else {
         handleSegment();
       }
-    }, 2500); // Reduced from 3500ms to 2500ms
+    }, 2000); // Reduced from 3500ms to 2500ms
   };
 
   const startRecording = async () => {
